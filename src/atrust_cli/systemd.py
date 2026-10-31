@@ -63,13 +63,23 @@ def restart_daemon() -> subprocess.CompletedProcess:
 
 
 def daemon_processes() -> list[str]:
-    """Names of running aTrust processes present on this machine."""
-    wanted = ("aTrustAgent", "aTrustTray", "aTrustTray2", "aTrustXtunnel-64",
-              "aTrustDaemon")
+    """Names of running aTrust processes present on this machine.
+
+    Uses ``pgrep -f`` with path anchors: pgrep matches the 15-char comm,
+    which truncates names like aTrustXtunnel-64 (16 chars).
+    """
+    patterns = {
+        "aTrustAgent": "bin/aTrustAgent",
+        "aTrustTray": "aTrust/aTrustTray",
+        "aTrustTray2": "bin/aTrustTray2",
+        "aTrustXtunnel-64": "bin/aTrustXtunnel-64",
+        "aTrustDaemon": "bin/aTrustAgent",
+    }
     pgrep = shutil.which("pgrep")
     found: list[str] = []
-    for name in wanted:
-        if pgrep and subprocess.run([pgrep, "-x", "--", name],
+    for name, pattern in patterns.items():
+        if pgrep and subprocess.run([pgrep, "-f", pattern],
                                     capture_output=True).returncode == 0:
-            found.append(name)
+            if name not in found:
+                found.append(name)
     return found
