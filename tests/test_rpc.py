@@ -64,12 +64,13 @@ class MockServer(threading.Thread):
         assert (ver_type & 0xFF) == MSG_CALL
         pos = 4
         (nlen,) = struct.unpack(">i", data[pos:pos + 4]); pos += 4
-        name = data[pos:pos + nlen].decode(); pos += nlen
+        raw_name = data[pos:pos + nlen].decode(); pos += nlen
+        name = raw_name.split(":", 1)[-1]  # TMultiplexedProtocol: "svc:method"
         (seqid,) = struct.unpack(">i", data[pos:pos + 4])
 
         resp = bytearray()
         resp += struct.pack(">I", VERSION_1 | MSG_REPLY)
-        resp += struct.pack(">i", len(name)) + name.encode()
+        resp += struct.pack(">i", len(raw_name)) + raw_name.encode()
         resp += struct.pack(">i", seqid)
         if name == "GetStatus":
             resp.append(T_MAP)

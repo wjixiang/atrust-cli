@@ -184,7 +184,9 @@ class ThriftPipeClient:
         w = _Writer()
         # version header has the high bit set — pack unsigned (same wire bytes)
         w.buf += struct.pack(">I", VERSION_1 | MSG_CALL)
-        w.string(method)
+        # servers host several services per pipe via TMultiplexedProcessor,
+        # which expects "<service>:<method>" as the message name
+        w.string(f"{self.service}:{method}")
         w.i32(self._seq)
         for fid, (ftype, value) in sorted((args or {}).items()):
             w.field_begin(ftype, fid)
