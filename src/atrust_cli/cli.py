@@ -241,7 +241,7 @@ def cmd_server(args: Any) -> int:
     return 0 if result.connect_ok and result.is_atrust else 1
 
 
-def cmd_login(args: Any) -> int:
+def _login_session_reuse(args: Any) -> int:
     """Orchestrate a login using the official client's session machinery.
 
     Never handles credentials: if a saved session exists the tray
@@ -305,6 +305,107 @@ def cmd_login(args: Any) -> int:
             print(f"  … waiting ({', '.join(procs) or 'no processes'})")
     print(warn(f"no session after {args.wait}s — check the login window"))
     return 1
+
+
+def cmd_login(args: Any) -> int:
+    if args.user:
+        return _login_with_credentials(args)
+    return _login_session_reuse(args)
+
+
+def _login_with_credentials(args: Any) -> int:
+    """Credential login: official passport API, MFA passed through interactively."""
+    import getpass
+
+    from .passport import ERR_RAND_EXPIRED, PassportClient, PassportError
+
+    client = PassportClient(args.url, insecure=args.insecure,
+                            timeout=args.timeout)
+
+    print(bold("1/4 authConfig…"), end=" ")
+    try:
+        cfg = client.auth_config()
+        has_keys = bool(client.pub_key and client.anti_replay_rand)
+        print("pubKey ✓" if client.pub_key else "no pubKey in response")
+    except PassportError as exc:
+        print(err(f"failed: {exc}"))
+        return 1
+    if args.pub_key:
+        client.pub_key = args.pub_key
+    if not client.pub_key:
+        print(err("server did not hand out a pubKey and none was provided "
+                  "(-k/--pub-key)"))
+        return 1
+
+    if not client.anti_replay_rand:
+        print(warn("no antiReplayRand from authConfig"))
+        answer = input("  bootstrap it with one sacrificial login attempt "
+                       "(counted as a failed login)? [y/N] ")
+        if answer.strip().lower() != "y":
+            print("falling back to the tray for this login:")
+            return _login_session_reuse(args)
+        # one deliberate attempt with a dummy rand refreshes it via the
+        # error response (observed: ERR_RAND_EXPIRED carries antiReplayRand)
+        client.anti_replay_rand = "0" * 16
+        try:
+            client.psw_login(args.user, "bootstrap-placeholder")
+        except PassportError as exc:
+            if exc.code != ERR_RAND_EXPIRED or not client.anti_replay_rand:
+                print(err(f"bootstrap failed: {exc}"))
+                return 1
+        print(f"  fresh antiReplayRand acquired")
+
+    password = getpass.getpass(f"password for {args.user}: ")
+
+    attempt = 0
+    while attempt < 5:
+        attempt += 1
+        print(bold(f"2/4 auth/psw (attempt {attempt})…"))
+        graph_code: str | None = None
+        try:
+            resp = client.psw_login(args.user, password)
+            print(ok("password accepted"))
+            return _finish_login(client, resp, args)
+        except PassportError as exc:
+            data = exc.data
+            if data.get("graphCheckCodeEnable"):
+                img = client.fetch_captcha()
+                if img:
+                    print(f"  captcha required — image saved to {img}")
+                    graph_code = input("  enter graph code: ").strip()
+                    try:
+                        resp = client.psw_login(args.user, password, graph_code)
+                        print(ok("password accepted"))
+                        return _finish_login(client, resp, args)
+                    except PassportError as exc2:
+                        exc = exc2
+            nxt = (exc.data or {}).get("nextService") or ""
+            if "sms" in nxt:
+                print("SMS verification required (server policy)")
+                client.send_sms(args.user)
+                code = input("  SMS code: ").strip()
+                try:
+                    resp = client.check_sms_code(args.user, code)
+                    print(ok("SMS verified"))
+                    return _finish_login(client, resp, args)
+                except PassportError as exc2:
+                    exc = exc2
+            print(err(f"login failed: {exc}"))
+            if exc.code == ERR_RAND_EXPIRED and client.anti_replay_rand:
+                print("  rand refreshed — retrying")
+                continue
+            return 1
+    print(err("too many attempts"))
+    return 1
+
+
+def _finish_login(client: Any, resp: dict, args: Any) -> int:
+    print(bold("3/4 session established"))
+    data = resp.get("data") or {}
+    if data.get("sidTicket"):
+        print(f"  sidTicket: {str(data['sidTicket'])[:16]}…")
+    print(bold("4/4 handing off to the aTrust client (browser-start)…"))
+    return _login_session_reuse(args)
 
 
 def cmd_version(args: Any) -> int:
@@ -377,6 +478,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--wait", type=int, default=120,
                    help="seconds to wait for a session")
     p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("-u", "--user", help="credential login mode: username "
+                                        "(password prompted, MFA interactive)")
+    p.add_argument("-k", "--pub-key", help="RSA pubKey hex override "
+                                           "(authConfig fallback)")
+    p.add_argument("--insecure", action="store_true", help="skip TLS verify")
+    p.add_argument("--timeout", type=float, default=10.0)
     p.set_defaults(func=cmd_login)
 
     p = sub.add_parser("version", help="print versions")
