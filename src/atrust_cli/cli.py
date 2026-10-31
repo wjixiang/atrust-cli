@@ -223,6 +223,24 @@ def cmd_logs(args: Any) -> int:
     return 0
 
 
+def cmd_server(args: Any) -> int:
+    from .portal import probe_manifest
+
+    result = probe_manifest(args.url, timeout=args.timeout, insecure=args.insecure)
+    if args.json:
+        print(json.dumps(result.__dict__, indent=2, ensure_ascii=False))
+        return 0 if result.connect_ok and result.is_atrust else 1
+    print(bold("server probe"))
+    for name, value in result.summary_lines():
+        mark = ""
+        if name == "reachable":
+            mark = ok("✔") if value == "yes" else err("✘")
+        if name == "aTrust controller":
+            mark = ok("✔") if value == "yes" else err("✘")
+        print(f" {mark} {name:<18} {value}")
+    return 0 if result.connect_ok and result.is_atrust else 1
+
+
 def cmd_version(args: Any) -> int:
     print(f"atrust-cli {__version__}")
     ver = paths.client_version()
@@ -278,6 +296,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-l", "--list", action="store_true", help="list log files")
     p.add_argument("log", nargs="?", help="substring of a log file name")
     p.set_defaults(func=cmd_logs)
+
+    p = sub.add_parser("server", help="probe a VPN controller address (/public/manifest)")
+    p.add_argument("url", help="e.g. https://vpn.csu.edu.cn")
+    p.add_argument("-j", "--json", action="store_true", help="JSON output")
+    p.add_argument("-k", "--insecure", action="store_true",
+                   help="skip TLS certificate verification")
+    p.add_argument("--timeout", type=float, default=5.0)
+    p.set_defaults(func=cmd_server)
 
     p = sub.add_parser("version", help="print versions")
     p.set_defaults(func=cmd_version)
