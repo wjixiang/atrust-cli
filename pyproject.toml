@@ -17,7 +17,7 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-atrust = "atrust_cli.cli:main"
+atrust-cli = "atrust_cli.cli:main"
 
 [build-system]
 requires = ["hatchling"]

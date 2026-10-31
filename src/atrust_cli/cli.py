@@ -252,7 +252,7 @@ def cmd_version(args: Any) -> int:
 # ------------------------------------------------------------------ main ---
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="atrust",
+        prog="atrust-cli",
         description="Unofficial CLI for the Sangfor aTrust SDP client "
                     "(reverse-engineered local RPC).",
     )
