@@ -241,6 +241,72 @@ def cmd_server(args: Any) -> int:
     return 0 if result.connect_ok and result.is_atrust else 1
 
 
+def cmd_login(args: Any) -> int:
+    """Orchestrate a login using the official client's session machinery.
+
+    Never handles credentials: if a saved session exists the tray
+    auto-reconnects with it; otherwise it opens the interactive login
+    page (captcha/MFA are completed there, by design).
+    """
+    import os
+    import subprocess
+    import time
+
+    core = SdpCoreClient(timeout=3.0)
+    try:
+        status = core.get_all_status()
+    except ThriftError:
+        status = None
+    if status:
+        print(ok("session already present in core:"))
+        emit_map(status, "status", False)
+        print("already logged in — nothing to do")
+        return 0
+
+    if not systemd.daemon_alive():
+        proc = systemd.start_daemon()
+        if proc.returncode != 0:
+            print(err("aTrustDaemon is not running and could not be started"
+                      " (needs root):"))
+            print((proc.stderr or "").strip())
+            print(warn("run: sudo systemctl start aTrustDaemon"))
+            return 1
+        time.sleep(2)
+
+    display = os.environ.get("DISPLAY")
+    if not display:
+        print(err("no DISPLAY — login needs a desktop session for the "
+                  "one-time interactive authentication"))
+        return 1
+
+    cmd = ["/usr/bin/atrust"]
+    if args.url:
+        cmd.append(args.url)
+    print(bold("launching aTrust tray…"))
+    subprocess.Popen(
+        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    print("waiting for session (complete the login window if it appears)…")
+    deadline = time.time() + args.wait
+    while time.time() < deadline:
+        time.sleep(3)
+        try:
+            status = SdpCoreClient(timeout=2.0).get_all_status()
+        except ThriftError:
+            status = None
+        procs = systemd.daemon_processes()
+        if status:
+            emit_map(status, "status", False)
+            print(ok("session established"))
+            return 0
+        if args.verbose:
+            print(f"  … waiting ({', '.join(procs) or 'no processes'})")
+    print(warn(f"no session after {args.wait}s — check the login window"))
+    return 1
+
+
 def cmd_version(args: Any) -> int:
     print(f"atrust-cli {__version__}")
     ver = paths.client_version()
@@ -304,6 +370,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="skip TLS certificate verification")
     p.add_argument("--timeout", type=float, default=5.0)
     p.set_defaults(func=cmd_server)
+
+    p = sub.add_parser("login", help="connect via the official client "
+                                      "(session reuse; interactive only when needed)")
+    p.add_argument("url", nargs="?", help="e.g. https://vpn.csu.edu.cn")
+    p.add_argument("--wait", type=int, default=120,
+                   help="seconds to wait for a session")
+    p.add_argument("-v", "--verbose", action="store_true")
+    p.set_defaults(func=cmd_login)
 
     p = sub.add_parser("version", help="print versions")
     p.set_defaults(func=cmd_version)
