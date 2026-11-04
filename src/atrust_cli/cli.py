@@ -408,6 +408,24 @@ def _finish_login(client: Any, resp: dict, args: Any) -> int:
     return _login_session_reuse(args)
 
 
+def _hex_key(value: str) -> str:
+    """argparse type: --pub-key must be a hex string (people accidentally
+    paste passwords here — fail fast with a clear message instead of an
+    int() traceback deep in the RSA code)."""
+    try:
+        int(value, 16)
+    except ValueError:
+        import argparse
+        raise argparse.ArgumentTypeError(
+            "--pub-key expects the server RSA public key as hex "
+            "(e.g. the contents of csu_pubkey.txt), not a password")
+    if len(value) < 128:
+        import argparse
+        raise argparse.ArgumentTypeError(
+            "--pub-key looks too short for an RSA modulus (need >=128 hex chars)")
+    return value
+
+
 def cmd_version(args: Any) -> int:
     print(f"atrust-cli {__version__}")
     ver = paths.client_version()
@@ -480,8 +498,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("-u", "--user", help="credential login mode: username "
                                         "(password prompted, MFA interactive)")
-    p.add_argument("-k", "--pub-key", help="RSA pubKey hex override "
-                                           "(authConfig fallback)")
+    p.add_argument("-k", "--pub-key", type=_hex_key, help="RSA pubKey hex override "
+                                                           "(authConfig fallback)")
     p.add_argument("--insecure", action="store_true", help="skip TLS verify")
     p.add_argument("--timeout", type=float, default=10.0)
     p.set_defaults(func=cmd_login)
