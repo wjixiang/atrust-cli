@@ -28,7 +28,9 @@ def encrypt_to_hex(plaintext: str, pub_key_hex: str, pub_key_exp: int | str = 65
         block = data[off:off + chunk_size]
         m = int.from_bytes(_pkcs1_v15_pad(block, key_len), "big")
         c = pow(m, e, n)
-        out.append(format(c, "x"))
+        # The current shipped SDK pads each RSA ciphertext to the modulus
+        # width. Dropping leading zeroes can produce odd-length hex strings.
+        out.append(format(c, f"0{key_len * 2}x"))
     return "".join(out)
 
 

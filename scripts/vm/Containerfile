@@ -1,0 +1,13 @@
+FROM docker.io/library/ubuntu:22.04
+LABEL org.opencontainers.image.title="aTrust isolated VM manager" \
+      org.opencontainers.image.description="QEMU/KVM runtime with aTrust web management sources; VPN runs inside the guest"
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    qemu-system-x86 qemu-utils genisoimage ca-certificates python3 openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+COPY src/atrust_cli /opt/atrust-manager/src/atrust_cli
+COPY scripts/vm/install-guest.sh /opt/atrust-manager/install-guest.sh
+COPY scripts/vm/run-vm.sh /usr/local/bin/atrust-vm
+RUN chmod 755 /usr/local/bin/atrust-vm
+WORKDIR /vm
+VOLUME /vm
+ENTRYPOINT ["/usr/local/bin/atrust-vm"]

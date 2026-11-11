@@ -1,6 +1,6 @@
 [project]
 name = "atrust-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Unofficial Python CLI for the Sangfor aTrust SDP client on Linux"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,6 +18,7 @@ dependencies = []
 
 [project.scripts]
 atrust-cli = "atrust_cli.cli:main"
+atrust-web = "atrust_cli.web:main"
 
 [build-system]
 requires = ["hatchling"]

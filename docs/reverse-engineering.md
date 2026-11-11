@@ -151,3 +151,55 @@ systemd
   机器上的实际输出为准）。
 
 — 报告完 —
+
+## 会话捕获与无头交接补充（2026-11-11）
+
+针对本机已安装的 2.5.16.30 随包 JavaScript 做静态检查，来源包括
+`web/old/jssdk/common.js`、`api/init.js`、`api/auth.js`、`api/res.js`、
+`business/init.js` 与 `src/service/util/http_client.js`。
+REA 保留证据：`ev_e9ec0180bb089e194760638cf28e21f9c15a80b0bcc2fe56b6331ca7f86217cd`
+（所选源码分析，其他文件及动态执行不在此证据覆盖范围内）。
+
+- 控制器 `authConfig` 使用 GET。旧 SDK 的密码、票据交换使用表单 POST；
+  新版 `web/assets/iconfont.7108884b.js` 的 `t_` 请求封装使用 JSON POST，
+  CLI 已改为跟随新版。仅依据旧 SDK 选择表单是此前实现的协议错误。
+  `x-sdp-rid` 是 `location.host` 的 Base64，包含显式端口；POST 携带
+  `x-csrf-token`，值来自配置的 `security.csrfToken`。
+- 本机 HTTPS 端口读取共享运行目录的 `httpserver`，默认 54630。
+  SDK 的 `/v1/service/init` 使用 JSON 包装：`addr/type/guid/lang/token/data`；
+  `data` 包含 `verifyCode`（来自 `clientVerifyCode`）、`pubKey`、
+  `disAllowSecurityRiskPopup`。返回数据可以包含 `sidTicket` 和后台会话状态。
+- `/v1/service/start` 的 `data` 为 `{sidTicket: ...}`；这才是旧 CLI 缺少的交接。
+- 官方 `restoreSession` 将 init 返回的票据提交控制器
+  `/passport/v1/public/sessionIdExchange`，恢复浏览器会话；
+  `/passport/v1/public/ticketExchange` 可从当前会话获取票据。
+- 网页的 `getSidTicket` 在本地保存超过 80000ms 后丢弃票据。这只是网页的
+  缓存策略，不证明服务端票据寿命或跨设备可用性。
+
+CLI 据此增加了 `--capture`、`--session-info`、`--resume`、`--headless`。
+密码认证完成后直接调用本机 HTTPS 接口，恢复流程不启动托盘。
+本机 HTTPS 请求固定为 loopback、禁用环境代理和重定向；只有本机端点跳过
+证书验证，控制器仍默认验证 TLS。会话缓存使用随机本地密钥加密所有字段。
+
+模拟 HTTP 服务已覆盖 Cookie 捕获、票据交接、无 DISPLAY 恢复、失效拒绝、
+缓存篡改拒绝及不输出秘密值。另对本机做了只读状态查询，确认
+`/v1/service/status` 可用，`GetAllStatus` 返回控制器 GUID 到数值状态的映射；
+未发起真实登录、注销或隧道启动。真实控制器的票据交换、MFA/设备检查和
+跨重启恢复仍需用户登录验证，不能从静态源码及模拟测试推定成功。
+
+### 密码认证协议修正
+
+继续检查新版 `iconfont.7108884b.js`、`master.c27ab6df.js`、
+`client.45d3faeb.js`。REA 保留证据
+`ev_a094dba4f671515c7448e57e6869de0afa679632f069f6c3efd760a71f1bd926`
+（限所选源码的静态分析；语义节点预算有限，不能据此推断运行成功）。
+
+- `75500000` 的官方枚举名是 `PASSPORT_FAILED`，源码写为 `755e5`。
+  它是通用认证失败，不能仅因响应含有新 `antiReplayRand` 就推定过期。
+- 新版远程请求使用 `application/json;charset=utf-8`，并带上
+  `x-csrf-token`、`x-sdp-traceid`。RSA 密文补齐到块宽度，避免丢失前导零。
+- CLI 仅在服务器说明明确指出防重放/随机数问题且挑战变化时重试一次；
+  其他认证错误直接停止。移除了缺少挑战时故意提交错误登录的 bootstrap。
+- 服务器错误消息会脱敏后显示；不会输出密码、Cookie、票据、CSRF 或随机数。
+- 已用合成数据通过 OpenSSL 独立解密校验 Python RSA 密文，并通过 32 项测试。
+  真实控制器只查询了 authConfig 的字段结构，未提交用户密码或启动隧道。

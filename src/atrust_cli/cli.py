@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from . import __version__
-from . import paths, systemd
+from . import authcache, paths, systemd
 from .rpc import SdpCoreClient
 from .thrift import ThriftError
 
@@ -241,12 +241,14 @@ def cmd_server(args: Any) -> int:
     return 0 if result.connect_ok and result.is_atrust else 1
 
 
-def _login_session_reuse(args: Any) -> int:
+def _login_session_reuse(args: Any, auto_relogin: bool = True) -> int:
     """Orchestrate a login using the official client's session machinery.
 
-    Never handles credentials: if a saved session exists the tray
+    Never handles credentials itself: if a saved session exists the tray
     auto-reconnects with it; otherwise it opens the interactive login
-    page (captcha/MFA are completed there, by design).
+    page (captcha/MFA are completed there, by design). With
+    ``auto_relogin`` a cached credential (see authcache) is replayed
+    silently before falling back to the tray.
     """
     import os
     import subprocess
@@ -257,11 +259,20 @@ def _login_session_reuse(args: Any) -> int:
         status = core.get_all_status()
     except ThriftError:
         status = None
-    if status:
+    from .agent import is_online
+    if is_online(status):
         print(ok("session already present in core:"))
         emit_map(status, "status", False)
         print("already logged in — nothing to do")
         return 0
+
+    if auto_relogin and not getattr(args, "no_cache", False):
+        if _try_cached_relogin(args):
+            return 0
+
+    if getattr(args, "headless", False):
+        print(err("no online session; use --resume or -u USER URL for headless login"))
+        return 1
 
     if not systemd.daemon_alive():
         proc = systemd.start_daemon()
@@ -297,7 +308,7 @@ def _login_session_reuse(args: Any) -> int:
         except ThriftError:
             status = None
         procs = systemd.daemon_processes()
-        if status:
+        if is_online(status):
             emit_map(status, "status", False)
             print(ok("session established"))
             return 0
@@ -308,104 +319,258 @@ def _login_session_reuse(args: Any) -> int:
 
 
 def cmd_login(args: Any) -> int:
+    from . import sessioncache, sessionflow
+
+    if args.auth_only:
+        if args.resume:
+            if args.user or args.capture or args.save or args.no_cache:
+                print(err("--resume --auth-only cannot use -u/--capture/--save/--no-cache"))
+                return 2
+            return sessionflow.resume_auth_only(args)
+        if not args.user:
+            print(err("--auth-only requires -u USER or --resume; "
+                      "the official login window can start a tunnel automatically"))
+            return 2
+        args.headless = True
+        args.capture = True
+    if args.resume and (args.user or args.capture or args.save or args.no_cache):
+        print(err("--resume cannot be combined with -u/--capture/--save/--no-cache"))
+        return 2
+    if args.session_info:
+        return sessionflow.info()
+    if args.forget:
+        removed = authcache.clear()
+        removed = sessioncache.clear() or removed
+        if removed:
+            print(ok(f"cached credentials removed "
+                     f"({authcache.cache_path()})"))
+        else:
+            print("no cached credentials to remove")
+        return 0
+
+    if args.resume:
+        return sessionflow.resume(args)
+    if args.capture and not args.url:
+        print(err("--capture requires the controller URL"))
+        return 2
+
+    if args.user and not args.url and not args.no_cache:
+        # -u without a url: reuse the cached one so relogin stays short
+        cred = authcache.load()
+        if cred and cred.username == args.user and cred.url:
+            args.url = cred.url
+
     if args.user:
+        if not args.url:
+            print(err("credential login requires the controller URL"))
+            return 2
         return _login_with_credentials(args)
-    return _login_session_reuse(args)
+    result = _login_session_reuse(args, auto_relogin=not args.no_cache)
+    if result == 0 and args.capture:
+        return sessionflow.capture_existing(args)
+    return result
 
 
-def _login_with_credentials(args: Any) -> int:
-    """Credential login: official passport API, MFA passed through interactively."""
+def _same_host(url_a: str, url_b: str) -> bool:
+    import urllib.parse
+
+    host_a = urllib.parse.urlparse(url_a).hostname or ""
+    host_b = urllib.parse.urlparse(url_b).hostname or ""
+    return bool(host_a) and host_a == host_b
+
+
+def _try_cached_relogin(args: Any) -> bool:
+    """Silently replay cached credentials before bothering the tray.
+
+    Fully non-interactive: anything that needs a human (captcha, SMS,
+    changed password) reports failure and the caller falls back to the
+    normal interactive flow.
+    """
+    cred = authcache.load()
+    if not cred or not cred.url or not cred.username:
+        return False
+    print(bold(f"no core session — trying cached relogin for "
+               f"{cred.username} ({cred.url})…"))
+    sub = argparse.Namespace(
+        url=cred.url,
+        user=cred.username,
+        pub_key=None,
+        insecure=getattr(args, "insecure", False),
+        timeout=getattr(args, "timeout", 10.0),
+        wait=getattr(args, "wait", 120),
+        verbose=getattr(args, "verbose", False),
+        save=False,
+        no_cache=True,
+        headless=getattr(args, "headless", False),
+        capture=getattr(args, "capture", False),
+    )
+    if _login_with_credentials(sub, password=cred.password,
+                               interactive=False,
+                               cached_pub_key=cred.pub_key) == 0:
+        return True
+    print(warn("cached relogin failed — falling back to the tray flow"))
+    return False
+
+
+def _login_with_credentials(args: Any, password: str | None = None,
+                            interactive: bool = True,
+                            cached_pub_key: str | None = None) -> int:
+    """Credential login: official passport API, MFA passed through interactively.
+
+    ``password`` (from the cache) and ``interactive=False`` together give
+    the silent relogin path: no prompts, captcha/SMS abort with a clear
+    message instead.
+    """
     import getpass
 
-    from .passport import ERR_RAND_EXPIRED, PassportClient, PassportError
+    from .passport import PassportClient, PassportError, is_rand_error, is_captcha_error
 
     client = PassportClient(args.url, insecure=args.insecure,
                             timeout=args.timeout)
 
     print(bold("1/4 authConfig…"), end=" ")
     try:
-        cfg = client.auth_config()
-        has_keys = bool(client.pub_key and client.anti_replay_rand)
+        client.auth_config()
         print("pubKey ✓" if client.pub_key else "no pubKey in response")
     except PassportError as exc:
         print(err(f"failed: {exc}"))
         return 1
     if args.pub_key:
         client.pub_key = args.pub_key
+        client.config["pubKey"] = args.pub_key
+    if not client.pub_key and cached_pub_key:
+        client.pub_key = cached_pub_key
+        client.config["pubKey"] = cached_pub_key
+        print("  using pubKey from the credential cache")
     if not client.pub_key:
         print(err("server did not hand out a pubKey and none was provided "
                   "(-k/--pub-key)"))
         return 1
 
     if not client.anti_replay_rand:
-        print(warn("no antiReplayRand from authConfig"))
-        answer = input("  bootstrap it with one sacrificial login attempt "
-                       "(counted as a failed login)? [y/N] ")
-        if answer.strip().lower() != "y":
-            print("falling back to the tray for this login:")
-            return _login_session_reuse(args)
-        # one deliberate attempt with a dummy rand refreshes it via the
-        # error response (observed: ERR_RAND_EXPIRED carries antiReplayRand)
-        client.anti_replay_rand = "0" * 16
-        try:
-            client.psw_login(args.user, "bootstrap-placeholder")
-        except PassportError as exc:
-            if exc.code != ERR_RAND_EXPIRED or not client.anti_replay_rand:
-                print(err(f"bootstrap failed: {exc}"))
-                return 1
-        print(f"  fresh antiReplayRand acquired")
+        print(err("authConfig did not supply antiReplayRand; authentication stopped "
+                  "without submitting a password"))
+        return 1
 
-    password = getpass.getpass(f"password for {args.user}: ")
+    from_cache = password is not None
+    if not from_cache:
+        cred = None
+        if not getattr(args, "no_cache", False):
+            cred = authcache.load()
+            if (cred and cred.username == args.user
+                    and _same_host(cred.url, args.url)):
+                password = cred.password
+                print("using cached password "
+                      "(atrust login --forget to remove it)")
+                from_cache = True
+    if not password:
+        if not interactive:
+            print(err("no password available (cache empty) and "
+                      "non-interactive"))
+            return 1
+        password = getpass.getpass(f"password for {args.user}: ")
+
+    if not password:
+        return 1  # unreachable: resolved above (kept for the type checker)
+    save_on_success = (args.save or from_cache or
+                       (not args.no_cache and authcache.cache_path().exists()))
+
+    def _succeed(resp: dict) -> int:
+        result = _finish_login(client, resp, args)
+        if result == 0 and save_on_success:
+            path = authcache.save(args.url, args.user, password,
+                                  client.pub_key)
+            print(ok(f"credentials cached ({path})"))
+        return result
 
     attempt = 0
+    rand_retries = 0
     while attempt < 5:
         attempt += 1
         print(bold(f"2/4 auth/psw (attempt {attempt})…"))
         graph_code: str | None = None
+        previous_rand = client.anti_replay_rand
         try:
             resp = client.psw_login(args.user, password)
             print(ok("password accepted"))
-            return _finish_login(client, resp, args)
+            return _succeed(resp)
         except PassportError as exc:
             data = exc.data
-            if data.get("graphCheckCodeEnable"):
+            if is_captcha_error(exc):
+                if not interactive:
+                    print(err("captcha required — cannot auto-relogin; "
+                              "run an interactive login"))
+                    return 1
                 img = client.fetch_captcha()
                 if img:
                     print(f"  captcha required — image saved to {img}")
+                    print("  open this image in an image viewer, then enter its code here")
                     graph_code = input("  enter graph code: ").strip()
+                    if not graph_code:
+                        print(err("captcha input empty; authentication stopped"))
+                        return 1
                     try:
                         resp = client.psw_login(args.user, password, graph_code)
                         print(ok("password accepted"))
-                        return _finish_login(client, resp, args)
+                        return _succeed(resp)
                     except PassportError as exc2:
                         exc = exc2
+                else:
+                    print(err("could not download a captcha image; authentication stopped"))
+                    return 1
             nxt = (exc.data or {}).get("nextService") or ""
             if "sms" in nxt:
+                if not interactive:
+                    print(err("SMS verification required — cannot "
+                              "auto-relogin; run an interactive login"))
+                    return 1
                 print("SMS verification required (server policy)")
                 client.send_sms(args.user)
                 code = input("  SMS code: ").strip()
                 try:
                     resp = client.check_sms_code(args.user, code)
                     print(ok("SMS verified"))
-                    return _finish_login(client, resp, args)
+                    return _succeed(resp)
                 except PassportError as exc2:
                     exc = exc2
             print(err(f"login failed: {exc}"))
-            if exc.code == ERR_RAND_EXPIRED and client.anti_replay_rand:
-                print("  rand refreshed — retrying")
+            if is_captcha_error(exc):
+                print(err("captcha was rejected; run login again for a new image"))
+                return 1
+            if from_cache and exc.code > 0 and not is_rand_error(exc):
+                print(warn("the cached password was rejected — it probably "
+                           "changed"))
+                if not interactive:
+                    print(err("run an interactive login to update it: "
+                              "atrust login -u USER URL"))
+                    return 1
+                password = getpass.getpass(
+                    f"current password for {args.user}: ")
+                from_cache = False
                 continue
+            if is_rand_error(exc):
+                if (rand_retries == 0 and client.anti_replay_rand
+                        and client.anti_replay_rand != previous_rand):
+                    rand_retries += 1
+                    print("  fresh antiReplayRand received — retrying once")
+                    continue
+                print(err("anti-replay validation failed; stopped to avoid repeated "
+                          "failed login attempts"))
+                return 1
             return 1
     print(err("too many attempts"))
     return 1
 
 
 def _finish_login(client: Any, resp: dict, args: Any) -> int:
-    print(bold("3/4 session established"))
-    data = resp.get("data") or {}
-    if data.get("sidTicket"):
-        print(f"  sidTicket: {str(data['sidTicket'])[:16]}…")
-    print(bold("4/4 handing off to the aTrust client (browser-start)…"))
-    return _login_session_reuse(args)
+    from . import sessionflow
+
+    print(bold("3/4 authentication response received"))
+    if getattr(args, "auth_only", False):
+        print(bold("4/4 capturing authentication without connecting a tunnel…"))
+    else:
+        print(bold("4/4 handing session to the official local agent…"))
+    return sessionflow.connect(client, resp, args)
 
 
 def _hex_key(value: str) -> str:
@@ -502,6 +667,24 @@ def build_parser() -> argparse.ArgumentParser:
                                                            "(authConfig fallback)")
     p.add_argument("--insecure", action="store_true", help="skip TLS verify")
     p.add_argument("--timeout", type=float, default=10.0)
+    p.add_argument("--save", action="store_true",
+                   help="cache the credentials (encrypted, machine-bound) "
+                        "so dropped sessions can relogin without a prompt")
+    p.add_argument("--no-cache", action="store_true",
+                   help="ignore the credential cache for this invocation")
+    p.add_argument("--forget", action="store_true",
+                   help="delete cached credentials and exit")
+    p.add_argument("--capture", action="store_true",
+                   help="save encrypted session ticket/cookies (no password implied)")
+    p.add_argument("--resume", action="store_true",
+                   help="restore the captured session without launching a tray")
+    p.add_argument("--headless", action="store_true",
+                   help="never launch a desktop tray")
+    p.add_argument("--auth-only", action="store_true",
+                   help="with -u USER or --resume: authenticate/capture only; "
+                        "never initialize or start the local agent")
+    p.add_argument("--session-info", action="store_true",
+                   help="show session capture summary without secret values")
     p.set_defaults(func=cmd_login)
 
     p = sub.add_parser("version", help="print versions")

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>aTrust · 隔离连接控制台</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="aTrust 控制台首页"><span class="brand-mark">a<span>·</span></span><span>aTrust <small>LOCAL CONSOLE</small></span></a>
+    <div class="workspace-label">工作空间</div>
+    <a class="nav-link active" href="#main"><span class="nav-icon">▦</span>连接控制台<span class="nav-dot"></span></a>
+    <a class="nav-link" href="#activity"><span class="nav-icon">≡</span>活动记录</a>
+    <div class="sidebar-bottom"><span class="isolation-dot"></span><span>独立网络环境<small>虚拟机中的 aTrust 服务</small></span><span class="shield-icon">◇</span></div>
+  </aside>
+
+  <main id="main" class="main">
+    <header class="topbar"><div class="breadcrumb">工作空间 <span>/</span> 连接控制台</div><div class="local-label"><span></span>本地管理 · 127.0.0.1</div></header>
+    <div class="content">
+      <div class="page-heading"><div><div class="eyebrow">YOUR CONNECTION, UNDER CONTROL</div><h1>连接控制台</h1><p>完成身份验证，再决定何时接入内网。</p></div><button id="refresh-state" class="button button-white button-small" type="button"><span aria-hidden="true">↻</span> 刷新状态</button></div>
+
+      <section class="overview" aria-label="当前状态">
+        <article class="stat-card"><div class="stat-icon teal">◈</div><div><div class="stat-label">身份认证</div><div id="auth-overview" class="stat-value">等待认证</div><div id="account-overview" class="stat-description">尚未登录账号</div></div><span id="auth-dot" class="status-dot"></span></article>
+        <article class="stat-card"><div class="stat-icon blue">⇄</div><div><div class="stat-label">VPN 隧道</div><div id="tunnel-overview" class="stat-value">正在读取</div><div class="stat-description">认证后手动建立连接</div></div><span id="tunnel-dot" class="status-dot"></span></article>
+        <article class="stat-card"><div class="stat-icon violet">⬡</div><div><div class="stat-label">网络隔离</div><div id="isolation-overview" class="stat-value">正在检测</div><div id="isolation-caption" class="stat-description">连接只在隔离环境中生效</div></div><span id="isolation-dot" class="status-dot"></span></article>
+      </section>
+
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-icon" aria-hidden="true">ⓘ</span><span id="notice-text"></span><button id="dismiss-notice" type="button" aria-label="关闭提示">×</button></div>
+
+      <div class="dashboard-grid">
+        <section class="panel auth-panel" aria-labelledby="auth-title">
+          <div class="panel-header"><div><span class="section-number">01</span><h2 id="auth-title">身份验证</h2></div><span id="stage-badge" class="badge neutral">尚未开始</span></div>
+          <div class="steps" aria-label="认证进度"><div id="step-password" class="step current"><span>1</span>账号密码</div><div class="step-line"></div><div id="step-captcha" class="step"><span>2</span>图形验证</div><div class="step-line"></div><div id="step-sms" class="step"><span>3</span>短信验证</div></div>
+
+          <form id="login-form" class="auth-body" autocomplete="on">
+            <p class="section-intro">使用你的 aTrust 账号开始认证。</p>
+            <label class="field-label" for="server">接入地址</label><div class="input-with-icon"><span aria-hidden="true">⌁</span><input id="server" type="text" value="正在读取服务器…" readonly aria-describedby="server-hint"></div><p id="server-hint" class="field-hint">由服务配置指定</p>
+            <label class="field-label" for="username">账号</label><input id="username" name="username" type="text" placeholder="输入账号" autocomplete="username" required maxlength="256">
+            <label class="field-label" for="password">密码</label><div class="password-wrap"><input id="password" name="password" type="password" placeholder="输入密码" autocomplete="current-password" required maxlength="1024"><button id="toggle-password" class="password-toggle" type="button" aria-label="显示密码">显示</button></div>
+            <button id="login-button" class="button button-primary button-full" type="submit">开始认证 <span aria-hidden="true">→</span></button>
+            <div class="quiet-note"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8V6a5 5 0 0 1 10 0v2M4 8h12v10H4zM10 12v2"/></svg>密码仅用于本次认证，不保存到磁盘。</div>
+          </form>
+
+          <section id="captcha-panel" class="auth-body" aria-labelledby="captcha-title" hidden>
+            <h3 id="captcha-title">点击图形验证码</h3><p class="section-intro">根据图片底部提示，依次点击三个字符。</p>
+            <div id="captcha-board" class="captcha-board" role="group" aria-label="点击验证码图片，依次选择三个位置"><img id="captcha-image" alt="验证码图片，图片底部包含点击顺序" draggable="false"><div id="captcha-markers" aria-hidden="true"></div></div>
+            <div class="captcha-controls"><span id="point-counter">已选择 0 / 3</span><div><button id="undo-point" class="text-button" type="button">撤销</button><button id="reset-points" class="text-button" type="button">重选</button><button id="refresh-captcha" class="text-button" type="button">换一张 ↻</button></div></div>
+            <details class="coordinate-help"><summary>无法直接点击？输入坐标</summary><p>以图片左上角为原点，输入三组坐标，例如 x,y；x,y；x,y。</p><div class="coordinate-input"><input id="coordinate-value" type="text" placeholder="x,y; x,y; x,y" aria-label="三个点击位置坐标"><button id="apply-coordinates" type="button" class="button button-white button-small">应用</button></div></details>
+            <button id="submit-captcha" class="button button-primary button-full" type="button" disabled>提交图形验证 <span aria-hidden="true">→</span></button><p class="field-hint centered">图片有效期有限，超时后请换一张。</p>
+          </section>
+
+          <form id="sms-form" class="auth-body" hidden>
+            <div class="sms-illustration" aria-hidden="true"><svg viewBox="0 0 48 48"><rect x="14" y="4" width="24" height="39" rx="5"/><path d="M22 9h8M24 37h4M7 17h20v14H7zM7 17l10 8 10-8"/></svg></div><h3>短信验证</h3><p class="section-intro">将验证码发送到账号绑定的手机后，在此填写。</p>
+            <label class="field-label" for="sms-code">短信验证码</label><div class="sms-input-wrap"><input id="sms-code" name="sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="输入验证码" required maxlength="12" pattern="[0-9]{4,12}"><button id="send-sms" class="text-button" type="button">发送验证码</button></div>
+            <button id="verify-sms" class="button button-primary button-full" type="submit">验证并保存会话 <span aria-hidden="true">→</span></button><div class="quiet-note">完成认证不会自动建立 VPN 隧道。</div>
+          </form>
+
+          <section id="success-panel" class="auth-body success-body" hidden><div class="success-check" aria-hidden="true">✓</div><h3>身份认证已完成</h3><p>会话凭据已加密保存。<br>现在可以在右侧手动连接 VPN。</p><div class="session-account"><span class="avatar">U</span><div><span id="success-account">当前账号</span><small id="session-details">会话已保存</small></div><span class="badge success">已认证</span></div><button id="switch-account" class="text-button" type="button">使用其他账号认证</button></section>
+
+          <div class="auth-footer"><div><span class="saved-icon" aria-hidden="true">↺</span><span>已有会话？</span></div><button id="restore-session" class="text-button" type="button" disabled>恢复已保存的登录 →</button></div>
+        </section>
+
+        <div class="right-column">
+          <section class="panel connection-panel" aria-labelledby="connection-title"><div class="panel-header"><div><span class="section-number">02</span><h2 id="connection-title">内网连接</h2></div><span id="connection-badge" class="badge neutral">未连接</span></div><div class="connection-body"><div class="connection-visual"><div class="endpoint"><div class="endpoint-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="5" width="24" height="17" rx="2"/><path d="M11 27h10M16 22v5"/></svg></div><span>你的设备</span></div><div id="network-line" class="network-line"><span></span><span class="line-shield">◇</span><span></span></div><div class="endpoint"><div class="endpoint-icon vm"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="6" y="3" width="20" height="26" rx="3"/><path d="M11 10h10M11 16h10M11 22h4"/></svg></div><span>隔离虚拟机</span></div></div><h3 id="connection-heading">准备好后，再连接。</h3><p id="connection-description">认证只确认你的身份；点击连接后，才会在虚拟机中建立 VPN 隧道。</p><button id="connect-button" class="button button-primary button-full" type="button" disabled>连接 VPN <span aria-hidden="true">↗</span></button><button id="disconnect-button" class="button button-danger button-full" type="button" hidden>断开 VPN 隧道</button></div></section>
+          <section class="proxy-card" aria-labelledby="proxy-title"><div class="proxy-title"><span class="proxy-icon" aria-hidden="true">⌘</span><h3 id="proxy-title">应用代理入口</h3><span class="badge subtle">SOCKS5</span></div><div class="proxy-address"><code id="proxy-address">127.0.0.1:10808</code><button id="copy-proxy" class="copy-button" type="button" aria-label="复制代理地址">复制</button></div><p>宿主机 SSH 代理开启后，让需要内网访问的应用使用此入口。其他流量保持原路径。</p><div class="proxy-footnote">域名解析请选择 SOCKS5 远程 DNS。</div></section>
+        </div>
+      </div>
+
+      <section id="activity" class="panel activity-panel" aria-labelledby="activity-title"><div class="panel-header"><div><span class="section-number">03</span><h2 id="activity-title">活动记录</h2><span class="live-label"><span></span>实时更新</span></div><button id="forget-session" class="text-button danger-text" type="button" disabled>清除保存的会话</button></div><ol id="event-list" class="event-list"><li class="empty-events">连接管理服务，读取当前状态…</li></ol></section>
+      <footer class="page-footer"><span>aTrust Local Console</span><span>认证与连接分开控制 <span class="footer-separator">·</span> 会话加密保存在本地</span></footer>
+    </div>
+  </main>
+</body>
+</html>

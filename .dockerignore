@@ -1,0 +1,9 @@
+**
+!src/
+!src/atrust_cli/
+!src/atrust_cli/**
+!scripts/
+!scripts/vm/
+!scripts/vm/**
+**/__pycache__/
+**/*.pyc

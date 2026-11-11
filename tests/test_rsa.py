@@ -22,3 +22,11 @@ def test_multi_block():
     long_pw = "x" * 500  # > 245 bytes -> two blocks
     out = encrypt_to_hex(long_pw, key, 65537)
     assert len(out) > 512  # two blocks concatenated
+
+
+def test_leading_zero_ciphertext_has_fixed_width():
+    # e=1 makes the ciphertext equal the padded message, forcing leading 00.
+    # This tests wire encoding independently of random padding choices.
+    out = encrypt_to_hex("pwd_fresh-rand", "A" * 512, 1)
+    assert len(out) == 512
+    assert bytes.fromhex(out).startswith(b"\x00\x02")

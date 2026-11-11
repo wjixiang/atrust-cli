@@ -13,3 +13,24 @@ uv.lock
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# Local virtual machine disks, SSH keys and runtime storage
+.vm/
+
+# Local credentials, authentication captures and diagnostic output
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_ed25519
+id_rsa
+credentials.json
+session.json
+session.key
+*.log
+*.qcow2
+*.img
+*.iso
+*.deb
+*.oci.tar
