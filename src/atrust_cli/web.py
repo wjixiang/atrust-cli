@@ -353,8 +353,9 @@ class Management:
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, manager):
+    def __init__(self, address, manager, allow_remote=False):
         self.manager = manager
+        self.allow_remote = allow_remote
         super().__init__(address, Handler)
 
 
@@ -365,10 +366,29 @@ class Handler(BaseHTTPRequestHandler):
         pass  # never log authentication bodies, query strings or headers
 
     def safe_host(self):
+        hosts = self.headers.get_all("Host", [])
+        if len(hosts) != 1:
+            return False
+        host = hosts[0]
         try:
-            return urlsplit("//" + self.headers.get("Host", "")).hostname in ("127.0.0.1", "localhost", "::1")
+            parsed = urlsplit("//" + host)
+            if (not parsed.hostname or parsed.netloc != host or parsed.path
+                    or parsed.query or parsed.fragment or parsed.username is not None
+                    or parsed.password is not None or any(c.isspace() for c in host)):
+                return False
+            if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                return False
+            return self.server.allow_remote or parsed.hostname in ("127.0.0.1", "localhost", "::1")
         except ValueError:
             return False
+
+    def safe_origin(self):
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        host = self.headers.get("Host", "")
+        schemes = ("http", "https") if self.server.allow_remote else ("http",)
+        return origin in {scheme + "://" + host for scheme in schemes}
 
     def reply(self, code, body, content_type="application/json; charset=utf-8"):
         if not isinstance(body, bytes):
@@ -405,9 +425,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         manager = self.server.manager
-        origin = self.headers.get("Origin")
         if (not self.safe_host()
-                or (origin and origin != "http://" + self.headers.get("Host", ""))
+                or not self.safe_origin()
                 or not secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), manager.csrf)):
             return self.reply(403, {"error": "请求校验失败，请刷新页面。"})
         try:
@@ -435,8 +454,9 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--server", default="https://vpn.csu.edu.cn")
     parser.add_argument("--allow-tunnel", action="store_true")
+    parser.add_argument("--allow-remote", action="store_true", help="allow remote Host headers for public/reverse-proxy access")
     args = parser.parse_args(argv)
-    server = Server((args.listen, args.port), Management(args.server, args.allow_tunnel))
+    server = Server((args.listen, args.port), Management(args.server, args.allow_tunnel), allow_remote=args.allow_remote)
     print(f"aTrust management: http://{args.listen}:{args.port}", flush=True)
     try:
         server.serve_forever()

@@ -107,7 +107,10 @@ def main():
             time.sleep(0.5)
         if not ready:
             raise RuntimeError('native user core RPC did not become ready')
-        spawn('web', [sys.executable, '-m', 'atrust_cli.web', '--listen', '0.0.0.0', '--port', '8080', '--server', server, '--allow-tunnel'], True)
+        web_args = [sys.executable, '-m', 'atrust_cli.web', '--listen', '0.0.0.0', '--port', '8080', '--server', server, '--allow-tunnel']
+        if os.environ.get('ATRUST_ALLOW_REMOTE') == '1':
+            web_args.append('--allow-remote')
+        spawn('web', web_args, True)
         spawn('socks', [sys.executable, '-m', 'atrust_cli.socks', '--listen', '0.0.0.0', '--port', '1080'], True)
         while not stopped:
             for name, proc in children:

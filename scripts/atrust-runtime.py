@@ -71,7 +71,8 @@ def run(args):
               '--env', 'ATRUST_HOST_NETNS='+os.readlink('/proc/self/ns/net'),
               '--env', 'ATRUST_SERVER='+args.server,
               '--env', f'ATRUST_SOCKS_ADDRESS=127.0.0.1:{args.socks_port}',
-              '--publish', f'127.0.0.1:{args.web_port}:8080',
+              '--env', 'ATRUST_ALLOW_REMOTE='+('1' if args.allow_remote else '0'),
+              '--publish', f'{"0.0.0.0" if args.allow_remote else "127.0.0.1"}:{args.web_port}:8080',
               '--publish', f'127.0.0.1:{args.socks_port}:1080',
               '--volume', 'atrust-native-state:/var/lib/atrust', args.image, check=True)
     print(f'Web: http://127.0.0.1:{args.web_port}; SOCKS5: 127.0.0.1:{args.socks_port}')
@@ -89,6 +90,7 @@ def main():
     r = commands.add_parser('run')
     r.add_argument('--server', required=True)
     r.add_argument('--web-port', type=int, default=8788)
+    r.add_argument('--allow-remote', action='store_true', help='publish Web on all IPv4 interfaces and allow remote Host headers')
     r.add_argument('--socks-port', type=int, default=10809)
     commands.add_parser('status')
     commands.add_parser('logs')

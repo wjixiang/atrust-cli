@@ -225,3 +225,27 @@ def test_connection_revoked_during_start_is_not_success(manager, monkeypatch):
         manager.connect()
     assert manager.stage == 'error'
     assert manager.tunnel == 'offline'
+
+
+def test_public_access_keeps_origin_and_csrf_checks(manager):
+    server = web.Server(('127.0.0.1', 0), manager, allow_remote=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{server.server_port}'
+    public_host = 'vpn.example.com:8788'
+    try:
+        with urllib.request.urlopen(urllib.request.Request(base+'/api/state', headers={'Host':public_host})) as r:
+            state=json.load(r)
+        for scheme in ('http','https'):
+            req=urllib.request.Request(base+'/api/session/forget',data=b'{}',headers={
+                'Host':public_host,'Origin':scheme+'://'+public_host,'X-CSRF-Token':state['csrf']})
+            with urllib.request.urlopen(req) as r:assert r.status==200
+        for headers in ({'Host':public_host},
+                        {'Host':public_host,'Origin':'https://evil.example','X-CSRF-Token':state['csrf']},
+                        {'Host':'vpn.example.com/path','X-CSRF-Token':state['csrf']},
+                        {'Host':'user@vpn.example.com','X-CSRF-Token':state['csrf']}):
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(urllib.request.Request(base+'/api/session/forget',data=b'{}',headers=headers))
+            assert exc.value.code==403
+    finally:
+        server.shutdown();server.server_close();thread.join()

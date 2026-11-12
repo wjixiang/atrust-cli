@@ -45,7 +45,8 @@ ssh -o 'ProxyCommand=nc -X 5 -x 127.0.0.1:10809 %h %p' 用户名@内网IP
 ```
 
 端口与旧 VM 模式分开，可用 `--web-port` 和 `--socks-port` 自定义。
-启动脚本仅发布本机地址，不应将没有额外身份验证的管理/代理端口公开。
+默认仅发布本机地址。使用 `run --allow-remote` 可将管理端口发布到所有 IPv4 接口，
+并允许远程 Host；该选项不增加管理认证。SOCKS 仍只发布本机地址。
 SOCKS 实现支持 CONNECT、代理端域名解析和 TCP 半关闭，不支持 UDP ASSOCIATE。
 
 ```bash
@@ -195,3 +196,5 @@ python scripts/atrust-runtime.py --image ghcr.io/wjixiang/atrust-native:arm64 ru
 原始 `.deb`，也不需要 KVM。代理和管理入口仍为本机10809和8788。
 这不代表已在 ARM 上验证真实 MFA 与内网访问：CI 不接收用户凭据，也不进行
 VPN 登录。真实 ARM 主机的控制器策略与内网连接仍需操作者验收。
+
+管理 JSON API、会话恢复及远程访问说明见 [管理 API](management-api.md)。
