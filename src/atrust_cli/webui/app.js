@@ -107,11 +107,12 @@
       $("coordinate-value").value = "";
       $("captcha-image").src = `/api/captcha?v=${encodeURIComponent(captchaVersion || 0)}`;
     }
+    $("proxy-address").textContent = state.proxy_address || "127.0.0.1:10808";
     $("connection-badge").textContent = online ? "已连接" : "未连接";
     $("connection-badge").className = `badge ${online ? "success" : "neutral"}`;
     $("network-line").classList.toggle("connected", online);
     $("connection-heading").textContent = online ? "已接入内网。" : "准备好后，再连接。";
-    $("connection-description").textContent = online ? "VPN 隧道正在隔离环境中运行。需要内网访问的应用可使用下方代理入口。" : state.disconnect_reason ? state.disconnect_reason : !state.isolated ? "当前仅允许完成身份认证。请在隔离虚拟机中运行服务，再建立 VPN 隧道。" : "认证只确认你的身份；点击连接后，才会在虚拟机中建立 VPN 隧道。";
+    $("connection-description").textContent = online ? "VPN 隧道正在隔离环境中运行。需要内网访问的应用可使用下方代理入口。" : state.disconnect_reason ? state.disconnect_reason : !state.isolated ? "当前仅允许完成身份认证。请在隔离运行环境中运行服务，再建立 VPN 隧道。" : "认证只确认你的身份；点击连接后，才会在隔离环境中建立 VPN 隧道。";
     $("connect-button").hidden = online;
     $("disconnect-button").hidden = !online;
     controls.forEach((control) => { control.disabled = Boolean(blocked); });
@@ -244,11 +245,11 @@
   $("refresh-state").addEventListener("click", refresh);
   $("copy-proxy").addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText("127.0.0.1:10808");
+      await navigator.clipboard.writeText($("proxy-address").textContent);
       $("copy-proxy").textContent = "已复制";
       setTimeout(() => { $("copy-proxy").textContent = "复制"; }, 1800);
     } catch (_) {
-      notice("代理地址：127.0.0.1:10808。请手动复制。 ");
+      notice(`代理地址：${$("proxy-address").textContent}。请手动复制。`);
     }
   });
   setInterval(() => {

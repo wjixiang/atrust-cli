@@ -34,3 +34,6 @@ session.key
 *.iso
 *.deb
 *.oci.tar
+
+# Native runtime state, logs and container storage
+.runtime/

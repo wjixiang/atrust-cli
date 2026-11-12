@@ -1,0 +1,29 @@
+FROM docker.io/library/ubuntu:22.04 AS payload
+RUN apt-get update && apt-get install -y --no-install-recommends python3 xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+COPY official.deb /tmp/official.deb
+COPY runtime/select-payload.py /tmp/select-payload.py
+RUN test "$(dpkg-deb -f /tmp/official.deb Architecture)" = amd64 \
+    && test "$(dpkg-deb -f /tmp/official.deb Version)" = 2.5.16.30 \
+    && dpkg-deb -x /tmp/official.deb /payload \
+    && python3 /tmp/select-payload.py /payload /selected
+
+FROM docker.io/library/ubuntu:22.04
+LABEL org.opencontainers.image.title="aTrust headless native runtime" \
+      org.opencontainers.image.source="https://github.com/wjixiang/atrust-cli" \
+      org.opencontainers.image.description="Official native tunnel components with Python management; no Electron or VM"
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3 ca-certificates iptables iproute2 procps tini unbound \
+    libgtk-3-0 libnss3 libxss1 libasound2 libnotify4 libgconf-2-4 libatomic1 \
+    libcurl4 libx11-xcb1 libxtst6 libqt5core5a libqt5dbus5 libqt5network5 libqt5widgets5 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 1000 --home-dir /var/lib/atrust/user --no-create-home --shell /usr/sbin/nologin atrust
+COPY --from=payload /selected/ /
+COPY src/atrust_cli /opt/atrust-cli/src/atrust_cli
+COPY runtime/unbound.conf /etc/atrust-runtime-unbound.conf
+COPY runtime/supervise.py /opt/atrust-runtime/supervise.py
+ENV PYTHONPATH=/opt/atrust-cli/src
+VOLUME /var/lib/atrust
+EXPOSE 8080 1080
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s CMD ["python3", "/opt/atrust-runtime/supervise.py", "--health"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "python3", "/opt/atrust-runtime/supervise.py"]

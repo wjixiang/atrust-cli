@@ -4,6 +4,7 @@ Uses the live VM's static UI but intercepts every API request with synthetic
 fixtures. It never sends a password/SMS or starts a real tunnel.
 """
 import json
+import argparse
 import struct
 import zlib
 
@@ -16,9 +17,12 @@ def chunk(kind, data):
 
 png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 272, 192, 8, 2, 0, 0, 0))
        + chunk(b"IDAT", zlib.compress((b"\0" + b"\xf0\xf5\xf4" * 272) * 192)) + chunk(b"IEND", b""))
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--base-url', default='http://127.0.0.1:8787')
+args = parser.parse_args()
 state = {"stage": "idle", "message": "测试会话", "username": "", "server": "https://vpn.example.com",
          "session_available": False, "cookie_count": 0, "tunnel": "offline", "isolated": True,
-         "csrf": "test-csrf", "events": [], "captcha_version": 0, "sms_retry_after": 0}
+         "proxy_address": "127.0.0.1:10809", "csrf": "test-csrf", "events": [], "captcha_version": 0, "sms_retry_after": 0}
 calls = []
 
 
@@ -60,12 +64,13 @@ with sync_playwright() as p:
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.route("**/api/**", route_api)
-    page.goto("http://127.0.0.1:8787/", wait_until="networkidle")
+    page.goto(args.base_url, wait_until="networkidle")
+    assert page.locator("#proxy-address").inner_text() == "127.0.0.1:10809"
     page.locator("#username").fill("test-user")
     page.locator("#password").fill("SYNTHETIC-PASSWORD")
     page.locator("#login-button").click()
     page.locator("#captcha-panel").wait_for(state="visible")
-    page.wait_for_function("document.querySelector('#captcha-image').complete && document.querySelector('#captcha-image').naturalWidth > 0")
+    page.wait_for_function("() => document.querySelector('#captcha-image').complete && document.querySelector('#captcha-image').naturalWidth > 0")
     assert page.locator("#password").input_value() == ""
     bounds = page.locator("#captcha-image").bounding_box()
     for x, y in [[40, 40], [140, 80], [220, 120]]:
@@ -74,7 +79,7 @@ with sync_playwright() as p:
     page.locator("#submit-captcha").click()
     page.locator("#sms-form").wait_for(state="visible")
     page.locator("#send-sms").click()
-    page.wait_for_function("document.querySelector('#send-sms').disabled")
+    page.locator("#send-sms:disabled").wait_for(state="visible")
     page.locator("#sms-code").fill("012345")
     page.locator("#verify-sms").click()
     page.locator("#success-panel").wait_for(state="visible")
@@ -84,7 +89,7 @@ with sync_playwright() as p:
     page.locator("#connect-button").wait_for(state="visible")
     for width, height in [(1440, 1000), (390, 844)]:
         page.set_viewport_size({"width": width, "height": height})
-        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth")
     assert not errors, errors
     assert calls == ["auth/begin", "auth/captcha", "auth/sms/send", "auth/sms/verify", "tunnel/connect", "tunnel/disconnect"]
     browser.close()

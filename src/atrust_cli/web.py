@@ -5,6 +5,7 @@ import argparse
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import secrets
 import threading
@@ -22,7 +23,8 @@ ASSETS = Path(__file__).with_name("webui")
 class Management:
     def __init__(self, server: str, allow_tunnel: bool = False):
         self.server = server.rstrip("/")
-        self.isolated = allow_tunnel and Path("/etc/atrust-vm-isolated").is_file()
+        self.isolated = allow_tunnel and any(Path(p).is_file() for p in
+            ("/etc/atrust-vm-isolated", "/etc/atrust-runtime-isolated"))
         self.lock = threading.RLock()
         self.csrf = secrets.token_urlsafe(32)
         self.stage = "idle"
@@ -82,6 +84,7 @@ class Management:
         return {"stage": self.stage, "message": self.message,
                 "username": self.username, "server": self.server,
                 "session_available": bool(saved), "cookie_count": len((saved or {}).get("cookies") or []),
+                "proxy_address": os.environ.get("ATRUST_SOCKS_ADDRESS", "127.0.0.1:10808"),
                 "disconnect_reason": self.disconnect_reason, "tunnel": self.tunnel, "isolated": self.isolated, "csrf": self.csrf,
                 "events": list(self.events), "captcha_version": self.captcha_version,
                 "sms_retry_after": max(0, int(self.sms_deadline - time.monotonic()) + 1)}
@@ -271,7 +274,7 @@ class Management:
 
     def connect(self):
         if not self.isolated:
-            raise ValueError("只允许在已配置的隔离虚拟机内建立隧道。")
+            raise ValueError("只允许在已配置的隔离隔离环境内建立隧道。")
         if self.stage != "authenticated" or not self.client:
             raise ValueError("请先完成认证。")
         self.client.auth_config(with_session=True)
@@ -295,7 +298,7 @@ class Management:
             raise ValueError(self.message) from exc
         self.tunnel = "online"
         self.tunnel_checked = time.monotonic()
-        self.event("VPN 已在虚拟机内持续在线，宿主机网络保持隔离。")
+        self.event("VPN 已在隔离环境内持续在线，宿主机网络保持隔离。")
 
     def disconnect(self):
         if not self.isolated:
@@ -305,7 +308,7 @@ class Management:
         self.tunnel = "offline"
         self.tunnel_checked = 0
         self.check_tunnel()
-        self.event("已向虚拟机内的 aTrust 发送离线请求。")
+        self.event("已向隔离环境内的 aTrust 发送离线请求。")
 
     def action(self, path, payload):
         actions = {"/api/auth/begin": lambda: self.begin(payload),
