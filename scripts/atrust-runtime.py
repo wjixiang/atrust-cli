@@ -32,9 +32,18 @@ IMAGE = 'localhost/atrust-native:latest'
 NAME = 'atrust-native'
 
 
-def build(deb, image):
+def native_architecture():
+    machine = platform.machine().lower()
+    architectures = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}
+    if machine not in architectures:
+        raise ValueError('supported Linux hosts: x86_64 and aarch64')
+    return architectures[machine]
+
+
+def build(deb, image, engine='podman'):
+    architecture = native_architecture()
     if not deb.is_file():
-        raise ValueError('provide an official 2.5.16.30 amd64 .deb via --deb')
+        raise ValueError('provide an official 2.5.16.30 .deb matching your host via --deb')
     # A fresh, explicit context prevents copying credentials, .git or VM disks.
     with tempfile.TemporaryDirectory(prefix='atrust-native-build-') as tmp:
         context = Path(tmp)
@@ -42,7 +51,12 @@ def build(deb, image):
         shutil.copytree(ROOT/'src/atrust_cli', context/'src/atrust_cli',
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         shutil.copytree(ROOT/'scripts/runtime', context/'runtime')
-        podman('build', '--format=docker', '-t', image, '-f', context/'runtime/Containerfile', context, check=True)
+        options = ['--platform', 'linux/'+architecture, '--build-arg', 'TARGETARCH='+architecture,
+                   '-t', image, '-f', str(context/'runtime/Containerfile'), str(context)]
+        if engine == 'docker':
+            subprocess.run(['docker', 'build', *options], check=True)
+        else:
+            podman('build', '--format=docker', *options, check=True)
 
 
 def run(args):
@@ -69,6 +83,7 @@ def main():
     commands = parser.add_subparsers(dest='action', required=True)
     b = commands.add_parser('build')
     b.add_argument('--deb', type=Path, required=True)
+    b.add_argument('--engine', choices=('podman', 'docker'), default='podman')
     load = commands.add_parser('load')
     load.add_argument('--archive', type=Path, required=True)
     r = commands.add_parser('run')
@@ -82,9 +97,9 @@ def main():
     commands.add_parser('remove')
     args = parser.parse_args()
     try:
-        if args.action in ('build', 'run') and platform.machine().lower() not in ('x86_64', 'amd64'):
-            raise ValueError('this official native runtime supports Linux x86_64 only')
-        if args.action == 'build': build(args.deb, args.image)
+        if args.action in ('build', 'run'):
+            native_architecture()
+        if args.action == 'build': build(args.deb, args.image, args.engine)
         elif args.action == 'load': podman('load', '-i', args.archive, check=True)
         elif args.action == 'run': run(args)
         elif args.action == 'status': podman('ps', '-a', '--filter', 'name='+NAME, check=True)

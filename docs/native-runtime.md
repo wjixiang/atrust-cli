@@ -7,8 +7,8 @@
 
 ## 构建
 
-目前只适配官方 `2.5.16.30` 的 Linux amd64 包。需要 Linux x86_64、rootless
-Podman、pasta 和可读写的 `/dev/net/tun`。此模式不需要 KVM 或嵌套虚拟化。
+支持官方 `2.5.16.30` 的 Linux amd64 / arm64 包，安装包必须与构建主机架构一致。
+需要 Linux x86_64 或 ARM64、rootless Podman、pasta 和可读写的 `/dev/net/tun`。此模式不需要 KVM 或嵌套虚拟化。
 
 ```bash
 python scripts/atrust-runtime.py build --deb /路径/atrust-2.5.16.30.deb
@@ -132,3 +132,31 @@ python scripts/runtime/check-connection.py --ssh 你的内网IP:22
 检查管理服务的隔离/在线状态，再通过本机 SOCKS5 接收 SSH 协议标识。
 不提交 SSH 用户名、密钥或密码，不登录或运行远程命令。没有 `--ssh` 时只检查
 隧道状态并返回退出码2，明确表示内网传输未验收；不会将在线状态当作数据测试。
+
+## ARM64 原生构建
+
+已从官方 CDN 获取同版本 ARM64 安装包，并验证 deb 的 Architecture=arm64，
+主 agent 与 xtunnel 的 ELF e_machine 均为183（AArch64），没有使用 x86 模拟。
+官方下载导航：<https://atrustcdn.sangfor.com/tools/clientVersion/index.html>。
+
+在 ARM64 Linux 主机执行：
+
+```bash
+curl -fL https://atrustcdn.sangfor.com/standard/linux/2.5.16.30/uos/arm64/aTrustInstaller_arm64.deb -o /tmp/atrust-arm64.deb
+echo '2e9545079243bb8e01d895f89cbdd3b52e8094200457b71047b3b6ef92c316f2  /tmp/atrust-arm64.deb' | sha256sum -c -
+python scripts/atrust-runtime.py build --deb /tmp/atrust-arm64.deb
+python scripts/atrust-runtime.py run --server https://你的控制器地址
+```
+
+构建会按主机选择 `linux/amd64` 或 `linux/arm64`，并同时核对 deb 元数据与
+两个关键 ELF 的实际架构，拒绝把 x86 包误标为 ARM 镜像。基础环境补充了
+ARM native 插件需要的 Wayland/EGL 系统库。默认构建使用 Podman；
+`build --engine docker` 可使用本机 Docker 构建，但运行脚本仍使用 rootless Podman。
+不在本机自动注册 binfmt，也不在 x86 主机上伪装成功完成 ARM 原生验证。
+
+`.github/workflows/native-arm64.yml` 使用 GitHub 的原生 `ubuntu-24.04-arm`
+runner，手动触发后下载经过 SHA256 固定的官方包、构建 ARM 镜像，并在独立
+Docker 网络验证后台服务、RPC、HTTP、健康检查及 SOCKS5 协商。只有显式选择
+publish 才推送到所属账号的 GHCR `atrust-native:arm64` 包，包应保持私有。
+CI 没有用户凭据，不验证真实 MFA、控制器访问策略或内网数据传输；
+这些仍需在操作者自己的 ARM64 主机完成。

@@ -1,0 +1,66 @@
+name: Native ARM64 runtime
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified image to the owner's private GHCR package
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  packages: write
+jobs:
+  native-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify native runner and source tests
+        run: |
+          test "$(uname -m)" = aarch64
+          python -m pip install . pytest
+          python -m pytest -q
+      - name: Download pinned official ARM64 package
+        run: |
+          curl --fail --show-error --location --retry 3 \
+            https://atrustcdn.sangfor.com/standard/linux/2.5.16.30/uos/arm64/aTrustInstaller_arm64.deb \
+            -o "$RUNNER_TEMP/aTrustInstaller_arm64.deb"
+          echo '2e9545079243bb8e01d895f89cbdd3b52e8094200457b71047b3b6ef92c316f2  '"$RUNNER_TEMP/aTrustInstaller_arm64.deb" | sha256sum -c -
+      - name: Build native ARM64 image
+        run: python scripts/atrust-runtime.py --image atrust-native:arm64 build --engine docker --deb "$RUNNER_TEMP/aTrustInstaller_arm64.deb"
+      - name: Start isolated native services
+        run: |
+          docker run -d --name atrust-arm64 --network bridge \
+            --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=NET_BIND_SERVICE \
+            --cap-add=FOWNER --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN \
+            --cap-add=DAC_OVERRIDE --cap-add=KILL --device=/dev/net/tun \
+            --dns=127.0.0.1 --dns-search=. --security-opt=no-new-privileges \
+            --pids-limit=256 --stop-timeout=15 \
+            -e ATRUST_HOST_NETNS="$(readlink /proc/self/ns/net)" \
+            -e ATRUST_SERVER=https://vpn.csu.edu.cn \
+            -e ATRUST_SOCKS_ADDRESS=127.0.0.1:10809 \
+            -p 127.0.0.1:8788:8080 -p 127.0.0.1:10809:1080 atrust-native:arm64
+          python scripts/runtime/check-startup.py --architecture arm64 --engine docker --name atrust-arm64
+      - name: Publish private ARM64 image
+        if: ${{ inputs.publish }}
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          image="ghcr.io/${GHCR_OWNER,,}/atrust-native"
+          docker tag atrust-native:arm64 "$image:arm64"
+          docker tag atrust-native:arm64 "$image:arm64-${GITHUB_SHA::7}"
+          docker push "$image:arm64"
+          docker push "$image:arm64-${GITHUB_SHA::7}"
+          docker logout ghcr.io
+      - name: Service lifecycle diagnostics
+        if: always()
+        run: docker logs atrust-arm64 2>/dev/null || true
+      - name: Clean up
+        if: always()
+        run: docker rm -f -v atrust-arm64 2>/dev/null || true

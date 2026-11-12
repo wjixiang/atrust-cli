@@ -3,10 +3,22 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import struct
 import sys
 
-source, dest = map(Path, sys.argv[1:])
+source, dest = map(Path, sys.argv[1:3])
+architecture = sys.argv[3] if len(sys.argv) > 3 else None
+if architecture not in (None, 'amd64', 'arm64'):
+    raise ValueError('supported package architectures: amd64, arm64')
 base = Path('usr/share/sangfor/aTrust')
+if architecture:
+    expected_machine = {'amd64': 62, 'arm64': 183}[architecture]
+    for name in ('aTrustAgent', 'aTrustXtunnel-64'):
+        with (source/base/'resources/bin'/name).open('rb') as stream:
+            header = stream.read(20)
+        if (len(header) != 20 or header[:6] != b'\x7fELF\x02\x01'
+                or struct.unpack('<H', header[18:20])[0] != expected_machine):
+            raise ValueError(f'{name} ELF architecture does not match {architecture}')
 # Keep native plugins and environment modules intact: they are dynamically loaded.
 # No Electron, Chromium resources, bundled web app, desktop hooks or unit files.
 paths = ['resources/bin', 'resources/lib', 'resources/shell', 'resources/version',

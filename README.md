@@ -69,7 +69,7 @@ python scripts/atrust-vm.py proxy
 
 也可将官方后台组件直接封装成独立网络空间的容器，不需要 Electron、KVM
 或完整桌面安装。它仍使用官方隧道二进制；构建时需要一次官方安装包。
-详见 [原生运行环境](docs/native-runtime.md)。
+支持与主机匹配的官方 amd64 / arm64 安装包，详见 [原生运行环境](docs/native-runtime.md)。
 
 ### 登录与凭据缓存
 
