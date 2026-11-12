@@ -157,6 +157,7 @@ ARM native 插件需要的 Wayland/EGL 系统库。默认构建使用 Podman；
 `.github/workflows/native-arm64.yml` 使用 GitHub 的原生 `ubuntu-24.04-arm`
 runner，手动触发后下载经过 SHA256 固定的官方包、构建 ARM 镜像，并在独立
 Docker 网络验证后台服务、RPC、HTTP、健康检查及 SOCKS5 协商。只有显式选择
-publish 才推送到所属账号的 GHCR `atrust-native:arm64` 包，包应保持私有。
+publish 且确认目标 GHCR 包已存在并为私有时，才推送 `atrust-native:arm64`。
+工作流拒绝向未初始化或公开的包发布官方二进制，不能依赖首次推送的默认可见性。
 CI 没有用户凭据，不验证真实 MFA、控制器访问策略或内网数据传输；
 这些仍需在操作者自己的 ARM64 主机完成。
