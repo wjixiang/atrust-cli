@@ -6,6 +6,10 @@ on:
         description: Publish the verified image to the owner's private GHCR package
         type: boolean
         default: false
+      transfer_certificate:
+        description: Optional public X.509 recipient certificate for an encrypted image artifact
+        type: string
+        default: ''
 permissions:
   contents: read
   packages: write
@@ -67,6 +71,24 @@ jobs:
           docker push "$image:arm64"
           docker push "$image:arm64-${GITHUB_SHA::7}"
           docker logout ghcr.io
+      - name: Export encrypted image for the recipient
+        if: ${{ inputs.transfer_certificate != '' }}
+        env:
+          RECIPIENT_CERTIFICATE: ${{ inputs.transfer_certificate }}
+        run: |
+          printf '%s\n' "$RECIPIENT_CERTIFICATE" > "$RUNNER_TEMP/recipient.crt"
+          docker save atrust-native:arm64 | gzip -3 > "$RUNNER_TEMP/arm64-image.tar.gz"
+          openssl cms -encrypt -aes-256-cbc -binary \
+            -in "$RUNNER_TEMP/arm64-image.tar.gz" -outform DER \
+            -out "$RUNNER_TEMP/atrust-arm64-image.cms" "$RUNNER_TEMP/recipient.crt"
+          rm "$RUNNER_TEMP/arm64-image.tar.gz"
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.transfer_certificate != '' }}
+        with:
+          name: encrypted-arm64-image
+          path: ${{ runner.temp }}/atrust-arm64-image.cms
+          compression-level: 0
+          retention-days: 1
       - name: Service lifecycle diagnostics
         if: always()
         run: docker logs atrust-arm64 2>/dev/null || true
