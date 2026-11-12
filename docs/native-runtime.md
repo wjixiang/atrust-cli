@@ -168,3 +168,30 @@ CI 没有用户凭据，不验证真实 MFA、控制器访问策略或内网数�
 导出经过 CMS 加密的镜像归档。私钥只保留在操作者本机，CI 不接收私钥；
 公共仓库中只上传密文 artifact，保留1天。操作者下载、解密并导入镜像后，
 使用自己的本机 registry 登录推送。没有证书时不导出镜像 artifact。
+
+### 已验证并发布的 ARM64 镜像
+
+2026-11-12 在原生 GitHub ARM64 runner 上完成62项测试、官方组件启动、ELF
+架构检查、独立网络、core RPC、HTTP状态、健康检查与 SOCKS5 协商验收。
+[验证及加密导出记录](https://github.com/wjixiang/atrust-cli/actions/runs/43156414689)。
+镜像通过加密归档取回本机后，用账号已有认证发布到私有 GHCR；已重新读取
+远端 manifest/config 核实 linux/arm64 与健康检查，并确认匿名访问被拒绝。
+
+```text
+ghcr.io/wjixiang/atrust-native:arm64
+ghcr.io/wjixiang/atrust-native:arm64-a215a3a
+```
+
+镜像摘要：`sha256:388921c5c574448016e52e923eeaed6db163c08c264753c1216b59640fd9fed1`。
+在已安装 Podman、pasta 且可访问 TUN 的 **ARM64 Linux 主机**上：
+
+```bash
+git pull
+podman login ghcr.io -u wjixiang
+python scripts/atrust-runtime.py --image ghcr.io/wjixiang/atrust-native:arm64 run --server https://你的控制器地址
+```
+
+登录 registry 使用有 `read:packages` 权限的账号 Token；运行时不需要提供
+原始 `.deb`，也不需要 KVM。代理和管理入口仍为本机10809和8788。
+这不代表已在 ARM 上验证真实 MFA 与内网访问：CI 不接收用户凭据，也不进行
+VPN 登录。真实 ARM 主机的控制器策略与内网连接仍需操作者验收。
